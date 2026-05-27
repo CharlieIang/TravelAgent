@@ -1,6 +1,6 @@
 # TravelAgent
 
-# Project structure
+Project structure
 travel-agent-project/
 ├── backend/                  # 后端核心逻辑
 │   ├── main.py               # Web 服务入口 (FastAPI)
