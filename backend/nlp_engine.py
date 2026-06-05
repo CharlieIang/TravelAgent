@@ -3,10 +3,10 @@ import re
 
 class NLPProcessor:
     def __init__(self):
-        # 1. 定义本地敏感词/违规词库
+        # 定义本地敏感词/违规词库
         self.sensitive_words = ["破坏", "作弊", "发票", "贷款", "赌博", "政治", "暴力", "买卖"]
         
-        # 2. 定义旅游口头禅/语气词停用词列表
+        # 定义旅游口头禅/语气词停用词列表
         self.stopwords = ["那个", "呃", "啊", "请问", "麻烦", "帮我", "谢谢", "一下", "哈", "呀", "吧"]
 
     def clean_text(self, text: str) -> str:
@@ -14,18 +14,18 @@ class NLPProcessor:
         if not text:
             return ""
         
-        # 1. 先过滤掉无意义的语气口头禅
+        # 先过滤掉无意义的语气口头禅
         for word in self.stopwords:
             text = text.replace(word, "")
             
-        # 2. 利用正则表达式，只保留中英文、数字和常用标点
+        # 利用正则表达式，只保留中英文、数字和常用标点
         text = re.sub(r"[^\u4e00-\u9fa5a-zA-Z0-9，。？！、]", "", text)
         
-        # 3. 标点清洗去重
+        # 标点清洗去重
         text = re.sub(r"，+", "，", text)
         text = re.sub(r"。+", "。", text)
         
-        # 4. 掐头去尾
+        # 掐头去尾
         text = text.strip("，。？！、")
             
         return text
