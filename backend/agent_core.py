@@ -6,12 +6,12 @@ from langchain_core.tools import tool
 from langchain.agents import create_tool_calling_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
-AMAP_KEY = os.getenv("AMAP_KEY")
+AMAP_KEY = os.getenv("AMAP_KEY") 
 
 def get_agent_executor():
-    """初始化并返回配置好的API AgentExecutor"""
+    """AgentExecutor"""
     DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
-    if not DEEPSEEK_API_KEY:
+    if not DEEPSEEK_API_KEY or not AMAP_KEY:
         return None
 
     llm = ChatOpenAI(
@@ -23,88 +23,101 @@ def get_agent_executor():
 
     @tool
     def get_current_weather(city: str) -> str:
-        """获取指定城市当前的天气预报、温度状况及出行穿衣、带伞建议。"""
+        """获取指定城市未来多天的天气预报及气温状况。"""
         try:
-            # 1. 查城市编码
             geo_url = f"https://restapi.amap.com/v3/config/district?keywords={city}&key={AMAP_KEY}"
             geo_res = requests.get(geo_url, timeout=5).json()
             adcode = geo_res["districts"][0]["adcode"]
             
-            # 2. 查天气预报
             weather_url = f"https://restapi.amap.com/v3/weather/weatherInfo?city={adcode}&key={AMAP_KEY}&extensions=all"
             weather_res = requests.get(weather_url, timeout=5).json()
             
-            if weather_res["status"] == "1" and weather_res["forecasts"]:
-                cast = weather_res["forecasts"][0]["casts"][0]
-                return (
-                    f"【真实高德天气数据】{city}今日天气状况：白天 {cast['dayweather']}，"
-                    f"晚上 {cast['nightweather']}；白天最高气温 {cast['daytemp']}°C，"
-                    f"夜间最低气温 {cast['nighttemp']}°C。请根据此天气给用户合理的出行带伞或防晒建议。"
-                )
+            if weather_res["status"] == "1" and weather_res.get("forecasts"):
+                casts = weather_res["forecasts"][0]["casts"]
+                weather_report = f"【真实高德未来多天天气预报】{city}近几日天气如下：\n"
+                for cast in casts:
+                    weather_report += f"- 日期 {cast['date']} (星期{cast['week']})：白天 {cast['dayweather']}，晚上 {cast['nightweather']}，气温 {cast['nighttemp']}°C ~ {cast['daytemp']}°C。\n"
+                return weather_report
         except Exception as e:
-            return f"暂时无法联网获取{city}的实时天气（原因:{str(e)}），请基于通用常识为用户规划。"
+            return f"无法获取{city}天气。"
 
     @tool
     def get_places_and_routes(city: str) -> str:
-        """查询指定城市的热门旅游景点名称和详细地址信息。"""
+        """查询指定城市的热门旅游景点名称、详细地址、风景图URL以及经纬度地理坐标。"""
         try:
-            places_url = f"https://restapi.amap.com/v3/place/text?keywords=景点&city={city}&key={AMAP_KEY}&output=json"
+            places_url = f"https://restapi.amap.com/v3/place/text?keywords=景点&city={city}&key={AMAP_KEY}&extensions=all&output=json"
             res = requests.get(places_url, timeout=5).json()
             
             if res.get("status") == "1":
                 pois = res.get("pois", [])
                 if not pois:
-                    return f"已联网，但未查到{city}的精细景点数据。"
+                    return f"没有查到{city}的精细景点数据。"
                 
                 cleaned_spots = []
-                # for poi in pois[:4]:
-                for poi in pois:
+                for poi in pois[:5]:
                     name = poi.get("name")
                     address = poi.get("address")
+                    location = poi.get("location", "") # 格式: "经度,纬度"
                     
-                    if name:
-                        # 把容易破坏 JSON 结构的所有双引号、单引号、中括号全部删去或替换
+                    img_url = ""
+                    photos = poi.get("photos", [])
+                    if photos and isinstance(photos, list):
+                        img_url = photos[0].get("url", "")
+                    
+                    if name and location:
                         name = name.replace('"', '“').replace("'", "‘").replace("[", "【").replace("]", "】")
-                        if address and isinstance(address, str):
-                            address = address.replace('"', '“').replace("'", "‘").replace("[", "【").replace("]", "】")
-                        else:
-                            address = '市中心附近'
-                            
-                        cleaned_spots.append(f"景点: {name} (地址: {address})")
+                        address = address.replace('"', '“').replace("'", "‘") if address else '市中心附近'
+                        
+                        spot_info = f"景点: {name} (地址: {address}) [地理经纬度坐标: {location}]"
+                        if img_url:
+                            spot_info += f" [真实风景图片链接: {img_url}]"
+                        cleaned_spots.append(spot_info)
                 
-                return f"【真实高德地图数据】{city}的核心热门景点如下：\n" + "\n".join(cleaned_spots)
-            else:
-                return f"未能联网查到{city}的精细景点数据。"
+                common_sense_guideline = (
+                    "\n【行业导游常识库（大模型必须严格遵守）：】\n"
+                    "1. 如果规划包含『秦始皇帝陵博物院/兵马俑』：现实旺季门票为120元，该景区极其庞大，往返及游览必须预留至少 3.5 到 4 小时，否则属于不合理规划。\n"
+                    "2. 如果规划包含『大理古城』或『丽江古城』：现实门票为 0 元（免费开放），建议游览 2-3 小时或晚上夜游。\n"
+                    "3. 如果规划包含『华山/泰山』等大型名山：门票通常在 100-160 元之间，进山车和索道另计（约150元），单程爬山或游览必须占用至少 6-8 小时（或一整天），严禁在同一天上午爬山、下午还安排跨城旅游。\n"
+                    "4. 对于其他未枚举的 A级 景区，请大模型凭借你的内部知识库，估计一个符合 2026 年现实的门票（免费/30元/50元/100元等）以及合理的游玩耗时，严禁瞎编！\n"
+                )
+                
+                return f"【真实高德地图数据】{city}的热门景点、风景图及经纬度坐标如下：\n" + "\n".join(cleaned_spots) + "\n" + common_sense_guideline
+            return f"未能联网查到{city}数据。"
         except Exception as e:
-            return f"暂时无法联网获取{city}的地图数据（原因:{str(e)}）。"
+            return f"无法获取{city}地图数据。"
 
     tools = [get_current_weather, get_places_and_routes]
 
+    # 💡 提示词微调，约束大模型输出纯数字的 map_coordinates 数组
     json_format_instruction = (
         "你是一个极其专业的智能旅游行程规划助手。\n"
         "当用户让你规划某地旅游行程时，你必须按以下步骤思考和行动：\n"
-        "1. 使用 get_current_weather 工具查询目的地的天气状况。\n"
-        "2. 使用 get_places_and_routes 工具查询目的地的热门景点及交通路线耗时。\n"
-        "3. 严谨地结合这两种工具返回的真实数据，并在【最终回答】时，必须且只能输出一个符合以下 JSON 格式的字符串，绝不要带有任何 JSON 块之外的闲聊或解释性文本：\n"
+        "1. 使用 get_current_weather 查询未来多天天气预报。\n"
+        "2. 使用 get_places_and_routes 查询热门景点、真实风景图URL及地理经纬度坐标。\n"
+        "3. 严谨地结合工具返回的真实数据，并在【最终回答】时，必须且只能输出一个符合以下 JSON 格式的字符串，绝不要带有任何外围闲聊与特殊说明：\n"
         "{{\n"
         '  "destination": "目的地城市名称",\n'
-        '  "weather_tips": "结合工具返回天气给出的精细穿衣和带伞防晒避坑建议",\n'
+        '  "weather_tips": "结合工具返回天气给出的精细穿衣建议",\n'
+        '  "map_coordinates": [\n'
+        "    {{\n"
+        '      "name": "景点A",\n'
+        '      "longitude": 提取工具返回该景点的浮点数经度(如 100.277697),\n'
+        '      "latitude": 提取工具返回该景点的浮点数纬度(如 25.587493)\n'
+        "    }}\n"
+        "  ],\n"
         '  "itinerary": [\n'
         "    {{\n"
         '      "day": "Day 1",\n'
-        '      "morning": "上午具体的景点行程编排与交通建议",\n'
-        '      "afternoon": "下午具体的景点行程编排与交通建议",\n'
-        '      "evening": "晚上具体的景点行程编排与餐饮夜景建议"\n'
-        "    }},\n"
-        "    {{\n"
-        '      "day": "Day 2",\n'
-        '      "morning": "...",\n'
-        '      "afternoon": "...",\n'
-        '      "evening": "..."\n'
+        '      "morning": "上午行程建议（不得少于100字）",\n'
+        '      "morning_img": "工具返回的该上午景点的图片URL，无则留空",\n'
+        '      "afternoon": "下午行程建议（不得少于100字）",\n'
+        '      "afternoon_img": "工具返回的该下午景点的图片URL，无则留空",\n'
+        '      "evening": "晚上行程建议（不得少于100字）",\n'
+        '      "evening_img": "工具返回的该晚上景点的图片URL，无则留空"\n'
         "    }}\n"
         "  ]\n"
         "}}\n"
-        "注意：如果用户只是进行日常礼貌问候，你不需要调用工具，也不需要输出 JSON，直接自然语言回复即可。"
+        "注意：`map_coordinates` 必须包含你计划去的所有景点的坐标，用于前端地图标记。日常问候直接自然语言回复。"
     )
 
     prompt = ChatPromptTemplate.from_messages([
