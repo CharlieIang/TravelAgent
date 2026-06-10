@@ -27,3 +27,19 @@ TravelAgent/
 - 💬 自然语言交互
 - 🎤 语音输入识别（ASR）
 - 👁️ 图像识别与分析（Vision）
+
+## 🚀 快速开始
+
+### 环境要求
+- Python 3.8+
+- pip 或 conda
+
+### 安装依赖
+```bash
+pip install -r requirements.txt
+```
+
+### 运行服务
+```bash
+streamlit run frontend/app.py
+```
